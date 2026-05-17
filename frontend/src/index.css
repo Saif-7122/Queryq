@@ -1,0 +1,9 @@
+/* Reset Vite default styles — all styling is handled by Tailwind via CDN */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
