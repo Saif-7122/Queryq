@@ -178,7 +178,7 @@ async def chat(request: ChatRequest):
         query_text=request.question,
         query_embedding=query_embedding,
         store=document_store,
-        top_k=5,
+        top_k=10,
     )
 
     if not retrieved:

@@ -42,7 +42,11 @@ function FileUploader({ onUpload }) {
     const form = new FormData()
     for (const file of files) form.append('files', file)
     try {
-      const res = await fetch(`${API}/upload`, { method: 'POST', body: form })
+      const res = await fetch(`${API}/upload`, { 
+        method: 'POST', 
+        body: form,
+        signal: AbortSignal.timeout(120000) // 2 minute timeout
+      })
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.detail || 'Upload failed')
@@ -496,6 +500,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, history: historyForApi }),
+        signal: AbortSignal.timeout(120000), // 2 minute timeout
       })
       if (!res.ok) {
         const err = await res.json()

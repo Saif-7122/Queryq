@@ -113,8 +113,8 @@ def _split_sentences(text: str) -> list[str]:
 
 def chunk_text(
     pages: list[dict],
-    chunk_size: int = 512,
-    overlap: int = 50,
+    chunk_size: int = 256,
+    overlap: int = 25,
 ) -> list[dict]:
     """
     Split page texts into token-sized chunks that respect sentence boundaries.
