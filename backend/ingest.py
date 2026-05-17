@@ -11,9 +11,6 @@ import uuid
 import re
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# 1. parse_file
-# ---------------------------------------------------------------------------
 
 def parse_file(file_bytes: bytes, filename: str) -> list[dict]:
     """
@@ -44,23 +41,22 @@ def parse_file(file_bytes: bytes, filename: str) -> list[dict]:
 def _parse_pdf(file_bytes: bytes, filename: str) -> list[dict]:
     """Extract per-page text from a PDF using PyMuPDF (fitz)."""
     try:
-        import fitz  # PyMuPDF
+        import fitz
     except ImportError as e:
         raise ImportError(
             "PyMuPDF is required for PDF parsing. Install with: pip install PyMuPDF"
         ) from e
 
     pages = []
-    # Open from bytes in-memory (no temp file needed)
     with fitz.open(stream=file_bytes, filetype="pdf") as doc:
         for page_index, page in enumerate(doc, start=1):
-            text = page.get_text("text")  # plain text extraction
+            text = page.get_text("text")
             text = text.strip()
-            if text:  # skip blank pages
+            if text:
                 pages.append({
-                    "text": text,
-                    "page_num": page_index,
-                    "doc_name": filename,
+                     "text": text,
+                     "page_num": page_index,
+                     "doc_name": filename,
                 })
     return pages
 
@@ -77,14 +73,7 @@ def _parse_txt(file_bytes: bytes, filename: str) -> list[dict]:
     }]
 
 
-# ---------------------------------------------------------------------------
-# 2. chunk_text
-# ---------------------------------------------------------------------------
-
-# Simple regex to split on sentence boundaries: period/!/? followed by whitespace.
 _SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])\s+')
-
-# Rough approximation: 1 token ≈ 4 characters (works well for English prose).
 _CHARS_PER_TOKEN = 4
 
 
@@ -120,10 +109,10 @@ def chunk_text(
     Returns:
         List of chunk dicts:
           {
-            "id":          str,   # UUID4 for deduplication / vector DB keying
+            "id":          str,
             "doc_name":    str,
             "page_num":    int,
-            "chunk_index": int,   # 0-based index within the document
+            "chunk_index": int,
             "text":        str,
           }
     """
@@ -135,7 +124,6 @@ def chunk_text(
         if not sentences:
             continue
 
-        # Slide a window of sentences to build chunks.
         window: list[str] = []
         window_tokens: int = 0
 
@@ -154,7 +142,6 @@ def chunk_text(
         for sentence in sentences:
             s_tokens = _approx_tokens(sentence)
 
-            # Edge case: a single sentence exceeds chunk_size — emit it alone.
             if not window and s_tokens >= chunk_size:
                 window = [sentence]
                 window_tokens = s_tokens
@@ -163,11 +150,8 @@ def chunk_text(
                 continue
 
             if window_tokens + s_tokens > chunk_size:
-                # Emit current window as a chunk.
                 flush_window()
 
-                # Build the overlap tail: walk backward through window sentences
-                # until we've collected ~`overlap` tokens.
                 overlap_sentences: list[str] = []
                 overlap_tokens = 0
                 for sent in reversed(window):
@@ -183,18 +167,12 @@ def chunk_text(
                 window.append(sentence)
                 window_tokens += s_tokens
 
-        # Flush any remaining sentences in the window.
         if window:
             flush_window()
 
     return chunks
 
 
-# ---------------------------------------------------------------------------
-# 3. embed_chunks
-# ---------------------------------------------------------------------------
-
-# Module-level cache so the model is loaded only once per process.
 _embedding_model: Any = None
 _EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
@@ -238,14 +216,11 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
 
     texts = [chunk["text"] for chunk in chunks]
 
-    # encode() returns a numpy ndarray of shape (n_chunks, 384).
-    # convert_to_numpy=True is the default; tolist() converts to plain Python lists
-    # so the dicts stay JSON-serialisable.
     embeddings = model.encode(
         texts,
         batch_size=64,
         show_progress_bar=False,
-        normalize_embeddings=True,  # recommended for cosine similarity with BGE
+        normalize_embeddings=True,
         convert_to_numpy=True,
     )
 

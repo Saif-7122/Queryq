@@ -39,11 +39,8 @@ class DocumentStore:
         if not chunks_with_embeddings:
             return
 
-        # 1. Append chunks to the master list
         self.chunks.extend(chunks_with_embeddings)
 
-        # 2. Update the embedding matrix
-        # Each 'embedding' is expected to be a list/array of floats.
         new_embeddings = np.array(
             [c["embedding"] for c in chunks_with_embeddings], 
             dtype=np.float32
@@ -52,12 +49,8 @@ class DocumentStore:
         if self.embedding_matrix is None:
             self.embedding_matrix = new_embeddings
         else:
-            # Stack the new embeddings onto the existing matrix
             self.embedding_matrix = np.vstack([self.embedding_matrix, new_embeddings])
 
-        # 3. Update the BM25 index
-        # Since rank_bm25 doesn't support incremental updates easily, 
-        # we re-index the entire corpus in the store.
         tokenized_corpus = [self._tokenize(c["text"]) for c in self.chunks]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
@@ -93,7 +86,6 @@ class DocumentStore:
             self.embedding_matrix = None
             self.bm25 = None
         else:
-            # Rebuild matrix and BM25 from remaining chunks
             self.embedding_matrix = np.array(
                 [c["embedding"] for c in self.chunks], dtype=np.float32
             )

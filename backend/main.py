@@ -17,10 +17,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Load .env before any module that reads env vars (e.g. llm.py)
 load_dotenv()
 
-# Verify GROQ_API_KEY is present at startup so we fail fast and clearly.
 if not os.environ.get("GROQ_API_KEY"):
     raise EnvironmentError(
         "GROQ_API_KEY is not set. Copy backend/.env.example to backend/.env "
@@ -32,26 +30,12 @@ from llm import answer_question
 from retrieval import retrieve
 from store import DocumentStore
 
-# ---------------------------------------------------------------------------
-# Singleton DocumentStore
-# ---------------------------------------------------------------------------
-
 document_store = DocumentStore()
-
-# ---------------------------------------------------------------------------
-# Lifespan (replaces deprecated on_event)
-# ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: nothing to initialise beyond what's already at module level.
     yield
-    # Shutdown: clean up the in-memory store.
     document_store.clear()
-
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="Queryq API",
@@ -60,7 +44,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins during development; restrict in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # Tighten this to your frontend URL in production
@@ -139,7 +122,6 @@ async def upload_files(files: list[UploadFile] = File(...)):
         file_bytes = await file.read()
 
         try:
-            # Full ingestion pipeline
             pages = parse_file(file_bytes, filename)
             chunks = chunk_text(pages)
             chunks_with_embeddings = embed_chunks(chunks)
@@ -178,18 +160,15 @@ async def chat(request: ChatRequest):
             detail="No documents have been uploaded yet. Please upload at least one document first.",
         )
 
-    # 1. Embed the query using the same model as ingest.py
-    from ingest import _get_embedding_model  # lazy import to avoid circular issues at module level
+    from ingest import _get_embedding_model
 
     model = _get_embedding_model()
     query_embedding: np.ndarray = model.encode(
-        # BGE models expect the query prefix at retrieval time
         "Represent this sentence for searching relevant passages: " + request.question,
         normalize_embeddings=True,
         convert_to_numpy=True,
     )
 
-    # 2. Hybrid retrieval
     retrieved = retrieve(
         query_text=request.question,
         query_embedding=query_embedding,
@@ -197,7 +176,6 @@ async def chat(request: ChatRequest):
         top_k=5,
     )
 
-    # 3. Out-of-scope guard
     if not retrieved:
         return ChatResponse(
             answer="I could not find this in the uploaded documents.",
@@ -205,7 +183,6 @@ async def chat(request: ChatRequest):
             out_of_scope=True,
         )
 
-    # 4. LLM answer
     history_dicts = [msg.model_dump() for msg in request.history]
     llm_result = answer_question(
         question=request.question,
@@ -213,7 +190,6 @@ async def chat(request: ChatRequest):
         history=history_dicts,
     )
 
-    # 5. Build source citations
     sources = [
         SourceItem(
             text=item["chunk"]["text"],
@@ -239,7 +215,6 @@ async def list_documents():
     """
     chunks = document_store.get_all_chunks()
     
-    # Count chunks per document while preserving insertion order
     counts: dict[str, int] = {}
     for chunk in chunks:
         name = chunk.get("doc_name", "")
@@ -263,7 +238,6 @@ async def delete_document(doc_name: str):
     Returns the doc_name and how many chunks were removed.
     Raises 404 if the document was not found in the store.
     """
-    # Check the document exists first
     existing = {c.get("doc_name") for c in document_store.get_all_chunks()}
     if doc_name not in existing:
         raise HTTPException(
@@ -273,7 +247,6 @@ async def delete_document(doc_name: str):
 
     removed_count = document_store.remove_document(doc_name)
     
-    # Get remaining docs after deletion
     remaining_docs = list({c.get("doc_name") for c in document_store.get_all_chunks() if c.get("doc_name")})
 
     return DeleteResponse(removed=doc_name, remaining_docs=remaining_docs)
