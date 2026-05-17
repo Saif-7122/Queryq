@@ -332,7 +332,16 @@ function ChatThread({ messages, loading, hasDocuments }) {
         </div>
       )}
       {messages.map((msg, i) => {
-        const cleanContent = msg.content ? msg.content.replace(/\*\*/g, '') : ''
+        const renderFormattedContent = (text) => {
+          if (!text) return ''
+          const parts = text.split('**')
+          return parts.map((part, index) => {
+            if (index % 2 !== 0) {
+              return <strong key={index} className="font-extrabold text-slate-950 dark:text-white">{part}</strong>
+            }
+            return part
+          })
+        }
         return (
           <div key={i} className={`flex items-end gap-2.5 fade-in ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`} style={{ animationDuration: '200ms' }}>
             {msg.role === 'assistant' ? (
@@ -349,7 +358,7 @@ function ChatThread({ messages, loading, hasDocuments }) {
                 ${msg.role === 'user'
                   ? 'bg-brand-600 text-white rounded-[16px] rounded-br-[4px]'
                   : 'bg-slate-100 text-slate-800 rounded-[16px] rounded-tl-[4px]'}`}>
-                {cleanContent}
+                {renderFormattedContent(msg.content)}
               </div>
               {msg.role === 'assistant' && (
                 <SourcePanel sources={msg.sources} outOfScope={msg.out_of_scope} />
