@@ -1,17 +1,10 @@
 fastapi
 uvicorn[standard]
 python-dotenv
+python-multipart==0.0.9
 groq>=0.9.0
-
-# --- Document parsing ---
-PyMuPDF>=1.24.0            # fitz: PDF text extraction
-
-# --- Chunking / NLP ---
-# (no extra dep needed — uses stdlib re)
-
-# --- Local embeddings (no PyTorch, low memory, fast ONNX runtime) ---
+PyMuPDF>=1.24.0
 fastembed>=0.2.0
+sentence-transformers>=3.0.0
 numpy>=1.26.0
-rank_bm25>=0.2.2               # Hybrid search index
-
-# Add other dependencies as needed (e.g., langchain, pinecone-client, chromadb)
+rank_bm25>=0.2.2
