@@ -331,28 +331,33 @@ function ChatThread({ messages, loading, hasDocuments }) {
           <p className="text-sm font-medium">Ask a question to begin chatting with your uploaded knowledge!</p>
         </div>
       )}
-      {messages.map((msg, i) => (
-        <div key={i} className={`flex items-end gap-2.5 fade-in ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`} style={{ animationDuration: '200ms' }}>
-          {msg.role === 'assistant' && (
-            <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center shrink-0 mb-0.5">
-              <svg className="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
-              </svg>
-            </div>
-          )}
-          <div className={`flex flex-col max-w-[78%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className={`px-4.5 py-3 text-sm leading-relaxed whitespace-pre-wrap shadow-sm
-              ${msg.role === 'user'
-                ? 'bg-brand-600 text-white rounded-[16px] rounded-br-[4px]'
-                : 'bg-slate-100 text-slate-800 rounded-[16px] rounded-tl-[4px]'}`}>
-              {msg.content}
-            </div>
-            {msg.role === 'assistant' && (
-              <SourcePanel sources={msg.sources} outOfScope={msg.out_of_scope} />
+      {messages.map((msg, i) => {
+        const cleanContent = msg.content ? msg.content.replace(/\*\*/g, '') : ''
+        return (
+          <div key={i} className={`flex items-end gap-2.5 fade-in ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`} style={{ animationDuration: '200ms' }}>
+            {msg.role === 'assistant' ? (
+              <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center shrink-0 mb-0.5 shadow-inner">
+                <svg className="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
+                </svg>
+              </div>
+            ) : (
+              <div className="w-7 h-7 shrink-0" />
             )}
+            <div className={`flex flex-col max-w-[78%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`px-5 py-3 text-sm leading-relaxed whitespace-pre-wrap shadow-md transition-all duration-200
+                ${msg.role === 'user'
+                  ? 'bg-brand-600 text-white rounded-[16px] rounded-br-[4px]'
+                  : 'bg-slate-100 text-slate-800 rounded-[16px] rounded-tl-[4px]'}`}>
+                {cleanContent}
+              </div>
+              {msg.role === 'assistant' && (
+                <SourcePanel sources={msg.sources} outOfScope={msg.out_of_scope} />
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
       {loading && <TypingIndicator />}
     </div>
   )
