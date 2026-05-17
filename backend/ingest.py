@@ -10,6 +10,11 @@ Steps:
 import uuid
 import re
 from typing import Any
+from sentence_transformers import SentenceTransformer
+
+# Load once at startup — not inside a function
+EMB_MODEL = SentenceTransformer("BAAI/bge-small-en-v1.5")
+
 
 
 def parse_file(file_bytes: bytes, filename: str) -> list[dict]:
@@ -173,23 +178,8 @@ def chunk_text(
     return chunks
 
 
-_embedding_model: Any = None
-_EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
-
-
 def _get_embedding_model():
-    """Lazy-load and cache the sentence-transformers model."""
-    global _embedding_model
-    if _embedding_model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as e:
-            raise ImportError(
-                "sentence-transformers is required for embedding. "
-                "Install with: pip install sentence-transformers"
-            ) from e
-        _embedding_model = SentenceTransformer(_EMBEDDING_MODEL_NAME)
-    return _embedding_model
+    return EMB_MODEL
 
 
 def embed_chunks(chunks: list[dict]) -> list[dict]:
