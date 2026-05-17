@@ -9,9 +9,8 @@ PyMuPDF>=1.24.0            # fitz: PDF text extraction
 # --- Chunking / NLP ---
 # (no extra dep needed — uses stdlib re)
 
-# --- Local embeddings (no API calls) ---
-sentence-transformers>=3.0.0   # loads BAAI/bge-small-en-v1.5
-torch>=2.2.0                   # CPU-only is fine; sentence-transformers pulls this in
+# --- Local embeddings (no PyTorch, low memory, fast ONNX runtime) ---
+fastembed>=0.2.0
 numpy>=1.26.0
 rank_bm25>=0.2.2               # Hybrid search index
 

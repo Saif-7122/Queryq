@@ -10,10 +10,29 @@ Steps:
 import uuid
 import re
 from typing import Any
-from sentence_transformers import SentenceTransformer
+import numpy as np
+from fastembed import TextEmbedding
 
-# Load once at startup — not inside a function
-EMB_MODEL = SentenceTransformer("BAAI/bge-small-en-v1.5")
+class FastEmbedWrapper:
+    def __init__(self):
+        # fastembed handles lazy downloading and ONNX model loading (<50MB model, <80MB RAM total)
+        self.model = TextEmbedding()
+
+    def encode(self, sentences, batch_size=64, show_progress_bar=False, normalize_embeddings=True, convert_to_numpy=True):
+        is_single = isinstance(sentences, str)
+        inputs = [sentences] if is_single else list(sentences)
+        
+        embeddings = list(self.model.embed(inputs))
+        
+        if convert_to_numpy:
+            embeddings = np.array(embeddings, dtype=np.float32)
+            
+        if is_single:
+            return embeddings[0]
+        return embeddings
+
+# Load once at startup — not inside a function using fastembed
+EMB_MODEL = FastEmbedWrapper()
 
 
 
