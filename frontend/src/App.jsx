@@ -341,7 +341,11 @@ function ChatThread({ messages, loading, hasDocuments }) {
           const parts = text.split('**')
           return parts.map((part, index) => {
             if (index % 2 !== 0) {
-              return <strong key={index} className="font-extrabold text-slate-950 dark:text-white">{part}</strong>
+              return (
+                <strong key={index} className={`font-extrabold ${msg.role === 'user' ? 'text-white' : 'text-slate-950'}`}>
+                  {part}
+                </strong>
+              )
             }
             return part
           })
