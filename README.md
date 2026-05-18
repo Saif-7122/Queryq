@@ -1,9 +1,8 @@
 # Queryq
 A document chat application that uses hybrid retrieval to answer questions based on uploaded files.
 
-Live demo: [VERCEL_URL]
-API docs: [RENDER_URL]/docs
-Demo video: [VIDEO_URL]
+Live demo: https://queryq.vercel.app/
+API docs: https://queryq-backend.onrender.com/docs
 
 ## What it does
 Users upload PDF or text files, which the backend parses and splits into manageable text chunks. When a user asks a question, the system retrieves the most relevant chunks using both keyword and dense vector search, passing them to a language model to generate an answer. The application cites the specific source document, page number, and text passage used, and explicitly refuses to answer if the information is not found in the uploaded documents.
@@ -11,13 +10,13 @@ Users upload PDF or text files, which the backend parses and splits into managea
 ## Screenshots
 
 <!-- SCREENSHOT: upload zone and document cards -->
-[screenshot-placeholder-01]
+![Upload zone and document cards](Screenshot%202026-05-18%20140344.png)
 
 <!-- SCREENSHOT: chat response with source panel open -->
-[screenshot-placeholder-02]
+![Chat response with source panel open](Screenshot%202026-05-18%20140326.png)
 
 <!-- SCREENSHOT: out-of-scope refusal -->
-[screenshot-placeholder-03]
+![Out-of-scope query refusal](Screenshot%202026-05-18%20141209.png)
 
 ## Features
 - PDF and plain text file upload
