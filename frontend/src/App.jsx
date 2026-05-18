@@ -570,79 +570,44 @@ export default function App() {
   const handleSend = async (question) => {
     const userMsg = { role: 'user', content: question }
     const newMessages = [...messages, userMsg]
-    // Placeholder assistant message that fills in as tokens arrive
-    const placeholder = { role: 'assistant', content: '', sources: [], out_of_scope: false, streaming: true }
-    setMessages([...newMessages, placeholder])
+    setMessages(newMessages)
     scrollToBottom()
     setLoading(true)
 
     const historyForApi = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
 
     try {
-      const res = await fetch(`${API}/chat/stream`, {
+      const res = await fetch(`${API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, history: historyForApi }),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(120000), // 2 minute timeout
       })
-
+      
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.detail || 'Chat request failed')
       }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let sources = []
-      let outOfScope = false
-      let fullContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const parts = buffer.split('\n\n')
-        buffer = parts.pop() // keep any incomplete trailing chunk
-        for (const part of parts) {
-          if (!part.startsWith('data: ')) continue
-          const evt = JSON.parse(part.slice(6))
-          if (evt.type === 'sources') {
-            sources = evt.sources
-            outOfScope = evt.out_of_scope
-          } else if (evt.type === 'token') {
-            fullContent += evt.token
-            setMessages(prev => {
-              const msgs = [...prev]
-              msgs[msgs.length - 1] = { role: 'assistant', content: fullContent, sources, out_of_scope: outOfScope, streaming: true }
-              return msgs
-            })
-            scrollToBottom()
-          } else if (evt.type === 'done') {
-            setMessages(prev => {
-              const msgs = [...prev]
-              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
-              return msgs
-            })
-          }
-        }
-      }
+      
+      const data = await res.json()
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.answer,
+        sources: data.sources,
+        out_of_scope: data.out_of_scope,
+      }])
     } catch (e) {
       // Detect Groq rate-limit (429) and show a friendly message
       const isRateLimit = e.message?.includes('429') || e.message?.includes('rate_limit') || e.message?.includes('Rate limit')
       const errorMsg = isRateLimit
         ? '⏳ Rate limit reached — the free Groq tier has hit its daily token limit. Please wait a few minutes and try again, or use a different API key.'
         : `⚠️ Error: ${e.message}`
-      setMessages(prev => {
-        const msgs = [...prev]
-        const last = msgs[msgs.length - 1]
-        if (last?.streaming) {
-          msgs[msgs.length - 1] = { role: 'assistant', content: errorMsg, sources: [], out_of_scope: false }
-        } else {
-          msgs.push({ role: 'assistant', content: errorMsg, sources: [], out_of_scope: false })
-        }
-        return msgs
-      })
+        
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: errorMsg,
+        sources: [], out_of_scope: false,
+      }])
     } finally {
       setLoading(false)
       scrollToBottom()
