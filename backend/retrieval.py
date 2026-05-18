@@ -247,7 +247,7 @@ def retrieve(
             continue
 
         chunk_vec = matrix[idx].astype(np.float32)
-        similarity = float(np.clip(_cosine_similarity_matrix(q, chunk_vec[np.newaxis, :]), 0, 1))
+        similarity = float(np.clip(_cosine_similarity_matrix(q, chunk_vec[np.newaxis, :]), 0, 1).item())
 
         results.append({
             "chunk": chunk,

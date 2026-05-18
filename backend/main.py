@@ -94,6 +94,11 @@ class DeleteResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/", summary="Root / Health Check")
+async def root():
+    return {"status": "ok", "message": "Queryq backend is running!"}
+
+
 @app.post("/upload", response_model=list[UploadResponse], summary="Upload and ingest documents")
 async def upload_files(files: list[UploadFile] = File(...)):
     """
