@@ -466,6 +466,42 @@ function MessageInput({ onSend, loading, disabled }) {
   )
 }
 
+// ─── SplashScreen ───────────────────────────────────────────────────────────
+function SplashScreen({ fading }) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950"
+      style={{ transition: 'opacity 0.5s ease', opacity: fading ? 0 : 1, pointerEvents: fading ? 'none' : 'all' }}
+    >
+      <div className="flex flex-col items-center gap-5">
+        {/* Logo mark */}
+        <div className="w-20 h-20 rounded-2xl bg-[#0F6E56] flex items-center justify-center shadow-2xl" style={{ boxShadow: '0 0 60px rgba(15,110,86,0.45)' }}>
+          <span className="text-white font-bold" style={{ fontSize: 44, lineHeight: 1, fontFamily: 'Inter, system-ui, sans-serif', letterSpacing: '-2px' }}>Q</span>
+        </div>
+        {/* Brand name */}
+        <div className="flex flex-col items-center gap-1">
+          <h1 className="text-white font-bold tracking-tight" style={{ fontSize: 32, letterSpacing: '-1px' }}>Queryq</h1>
+          <p className="text-slate-400 text-sm font-medium">AI-Powered Document Chat</p>
+        </div>
+        {/* Animated loading dots */}
+        <div className="flex gap-1.5 mt-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#0F6E56]"
+              style={{ animation: 'splash-dot 1.2s ease-in-out infinite', animationDelay: `${i * 0.2}s` }}
+            />
+          ))}
+        </div>
+      </div>
+      <style>{`
+        @keyframes splash-dot {
+          0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1.2); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [docs, setDocs]         = useState([])   // { doc_name, chunk_count }
@@ -475,7 +511,16 @@ export default function App() {
   const [deleteError, setDeleteError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showColdStart, setShowColdStart] = useState(true)
+  const [appReady, setAppReady]   = useState(false)   // false = splash visible
+  const [splashFading, setSplashFading] = useState(false) // triggers CSS fade-out
   const threadRef = useRef(null)
+
+  // Show splash for 1.4s, then fade it out over 0.5s
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => setSplashFading(true), 1400)
+    const hideTimer = setTimeout(() => setAppReady(true), 1900)
+    return () => { clearTimeout(fadeTimer); clearTimeout(hideTimer) }
+  }, [])
 
   const fetchDocuments = useCallback(async () => {
     setFetching(true)
@@ -583,13 +628,18 @@ export default function App() {
         }
       }
     } catch (e) {
+      // Detect Groq rate-limit (429) and show a friendly message
+      const isRateLimit = e.message?.includes('429') || e.message?.includes('rate_limit') || e.message?.includes('Rate limit')
+      const errorMsg = isRateLimit
+        ? '⏳ Rate limit reached — the free Groq tier has hit its daily token limit. Please wait a few minutes and try again, or use a different API key.'
+        : `⚠️ Error: ${e.message}`
       setMessages(prev => {
         const msgs = [...prev]
         const last = msgs[msgs.length - 1]
         if (last?.streaming) {
-          msgs[msgs.length - 1] = { role: 'assistant', content: `⚠️ Error: ${e.message}`, sources: [], out_of_scope: false }
+          msgs[msgs.length - 1] = { role: 'assistant', content: errorMsg, sources: [], out_of_scope: false }
         } else {
-          msgs.push({ role: 'assistant', content: `⚠️ Error: ${e.message}`, sources: [], out_of_scope: false })
+          msgs.push({ role: 'assistant', content: errorMsg, sources: [], out_of_scope: false })
         }
         return msgs
       })
@@ -602,7 +652,11 @@ export default function App() {
   const hasDocuments = docs.length > 0
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white relative">
+    <>
+      {/* Branded splash — stays until appReady, fades out smoothly */}
+      {!appReady && <SplashScreen fading={splashFading} />}
+
+      <div className="flex h-screen overflow-hidden bg-white relative">
 
       {/* ── Left Sidebar Backdrop (Mobile overlay) ────────────────────────── */}
       {sidebarOpen && (
@@ -702,5 +756,6 @@ export default function App() {
         </div>
       </main>
     </div>
+    </>
   )
 }
