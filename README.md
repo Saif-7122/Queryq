@@ -1,91 +1,111 @@
-# Queryq — Document Intelligence Platform
+# Queryq
+A document chat application that uses hybrid retrieval to answer questions based on uploaded files.
 
-Queryq is a high-performance, full-stack RAG (Retrieval-Augmented Generation) platform that allows users to chat with their PDF and TXT documents. It combines local semantic search with keyword-based retrieval to provide highly accurate, grounded answers using Llama 3 via Groq.
+Live demo: [VERCEL_URL]
+API docs: [RENDER_URL]/docs
+Demo video: [VIDEO_URL]
 
-## 🏗️ Architecture
+## What it does
+Users upload PDF or text files, which the backend parses and splits into manageable text chunks. When a user asks a question, the system retrieves the most relevant chunks using both keyword and dense vector search, passing them to a language model to generate an answer. The application cites the specific source document, page number, and text passage used, and explicitly refuses to answer if the information is not found in the uploaded documents.
 
-```text
-                                    +-----------------------+
-                                    |     React Frontend    |
-                                    | (Vite + Tailwind CSS) |
-                                    +-----------+-----------+
-                                                |
-                                      /upload   |   /chat
-                                                v
-+---------------------------------------------------------------------------------------+
-|                                    FastAPI Backend                                    |
-|                                                                                       |
-|  +-------------------+      +-----------------------+      +-----------------------+  |
-|  |   Ingest Pipe     |      |    Document Store     |      |   Retrieval Pipe      |  |
-|  | (PyMuPDF / S-BERT)|      | (In-Memory + BM25)    |      | (Dense + BM25 + RRF)  |  |
-|  +---------+---------+      +-----------+-----------+      +-----------+-----------+  |
-|            |                            |                              ^              |
-|            +----------------------------+------------------------------+              |
-|                                         |                                             |
-|                                         v                                             |
-|                               +-----------------------+                               |
-|                               |       Groq LLM        |                               |
-|                               | (Llama 3.3 70B)       |                               |
-|                               +-----------------------+                               |
-+---------------------------------------------------------------------------------------+
-```
+## Screenshots
 
-## 🚀 Features
+<!-- SCREENSHOT: upload zone and document cards -->
+[screenshot-placeholder-01]
 
-- **Hybrid Search**: Combines Dense (Semantic) and BM25 (Keyword) retrieval.
-- **RRF Fusion**: Uses Reciprocal Rank Fusion to merge search results fairly.
-- **Smart Chunking**: Sentence-boundary-aware splitting with sliding window overlap.
-- **Document Manager**: Add or remove documents mid-session with instant index rebuilding.
-- **Source Citation**: Bot answers include expandable source panels with text highlighting.
-- **Confidence Scoring**: Visual badges (Green/Yellow/Red) showing retrieval similarity.
-- **Out-of-Scope Guard**: Dual-layer protection (Confidence threshold + LLM System Prompt).
-- **Premium UI**: Dark-mode, glassmorphic design with smooth micro-animations.
+<!-- SCREENSHOT: chat response with source panel open -->
+[screenshot-placeholder-02]
 
-## 🛠️ Tech Stack
+<!-- SCREENSHOT: out-of-scope refusal -->
+[screenshot-placeholder-03]
 
-| Technology | Role | Reason |
-| :--- | :--- | :--- |
-| **FastAPI** | Backend Framework | High performance, async-first, and automatic Swagger documentation. |
-| **React + Vite** | Frontend | Lightning-fast development and optimized production bundles. |
-| **Tailwind CSS** | Styling | Rapid UI building with a cohesive, modern utility-first approach. |
-| **Groq (Llama 3.3)** | LLM | Extreme inference speed (up to 500+ tokens/sec) and state-of-the-art reasoning. |
-| **Sentence-Transformers** | Local Embeddings | Local embedding generation using `bge-small-en-v1.5` for cost/privacy. |
-| **PyMuPDF** | PDF Parsing | Robust and fast text extraction from complex PDF structures. |
-| **Rank-BM25** | Keyword Search | Standard industry implementation for classical text retrieval. |
+## Features
+- PDF and plain text file upload
+- Multi-document support
+- Drag and drop file interface
+- Local embeddings generation
+- Hybrid BM25 and dense vector retrieval
+- Reciprocal Rank Fusion (RRF) algorithm
+- Source citation and highlighting
+- Retrieval confidence scores
+- Out-of-scope query detection
+- Conversation history context
 
-## 📖 Deep Dive: Pipeline Logic
+## Architecture
 
-### Ingestion & Chunking
-Queryq doesn't just cut text at arbitrary lengths.
-- **Sentence-Aware**: It splits text into individual sentences and groups them.
-- **Size & Overlap**: Each chunk is targeted at **512 tokens** with a **50-token overlap**.
-- **Context Preservation**: The overlap ensures that sentences aren't orphaned from their context across chunk boundaries.
+Browser
+  |
+  v
+FastAPI
+  |-- ingest.py (PDF parsing and text chunking)
+  |-- store.py (In-memory vector and keyword index)
+  |-- retrieval.py (Hybrid search and RRF scoring)
+  |-- llm.py (Prompt assembly and API communication)
 
-### Hybrid Retrieval (RRF)
-We use a two-pronged search approach:
-1. **Dense Search**: Measures semantic similarity (meaning) using cosine similarity.
-2. **BM25 Search**: Measures keyword frequency (exact matches).
-3. **Reciprocal Rank Fusion (RRF)**: Merges the two lists using the formula `1 / (60 + rank)`. This ensures that a document ranking well in *both* lists rises to the top, while protecting against outliers.
+## Tech stack
+Backend | Python, FastAPI
+Frontend | React, Vite, Tailwind CSS
+Parsing | PyMuPDF
+Embeddings | SentenceTransformers
+Keyword search | Rank-BM25
+LLM | Groq API
+Deployment | Render, Vercel
 
-### Out-of-Scope Detection
-To prevent hallucinations, Queryq employs two layers of defense:
-- **Retrieval Threshold**: If the best-retrieved chunk has a cosine similarity below **0.30**, the system signals "out-of-scope" immediately.
-- **LLM Guard**: The system prompt forces the LLM to strictly answer only from provided context. If the answer isn't there, it returns a specific "not found" string.
+## Chunking strategy
+Documents are parsed and split using sentence-boundary detection to avoid breaking mid-sentence. The strategy targets chunks of approximately 512 tokens with an overlap of 50 tokens between adjacent chunks to preserve context. Each chunk stores metadata including the source document name, page number, and original text.
 
-## 💻 Local Setup
+## Retrieval strategy
+Dense search uses a local embedding model to convert the user query into a vector and calculates cosine similarity against document chunks. This captures the semantic meaning of the question.
 
-### Backend
-1. `cd backend`
-2. Create a virtual environment: `python -m venv venv`
-3. Activate it: `source venv/bin/activate` (or `venv\Scripts\activate` on Windows)
-4. Install dependencies: `pip install -r requirements.txt`
-5. Configure `.env`: Copy `.env.example` to `.env` and add your `GROQ_API_KEY`.
-6. Run: `uvicorn main:app --reload`
+BM25 search tokenizes the query and compares it against an inverted index of the document chunks. This ensures exact keyword matches and specific domain terms are not lost.
 
-### Frontend
-1. `cd frontend`
-2. Install: `npm install`
-3. Run: `npm run dev`
+Reciprocal Rank Fusion (RRF) combines the results from both methods. It takes the ranking positions from the dense and keyword searches, calculates a fused score, and returns the top combined results to provide to the language model.
+
+Out-of-scope queries are handled in two layers. First, if the highest retrieval confidence score is below a predefined threshold, the system immediately flags the query as out of scope. Second, the language model is instructed via its system prompt to state it cannot find the answer if the provided chunks do not contain relevant information.
+
+## Real document test
+Document: [DOCUMENT_NAME]
+Q: [QUESTION_1] -> A: [ANSWER] -> Source: [DOC], page [N], [X]% confidence -> Passage: [CITED_TEXT]
+Q: [QUESTION_2] -> same format
+Out-of-scope test: "What is the capital of France?" -> "I could not find this in the uploaded documents."
+
+## Local setup
+Backend setup:
+1. Navigate to the backend directory
+2. Create and activate a Python virtual environment
+3. Install dependencies using pip install -r requirements.txt
+4. Create a .env file with your GROQ_API_KEY
+5. Start the server with uvicorn main:app --reload
+6. Access Swagger API documentation at http://127.0.0.1:8000/docs
+
+Frontend setup:
+1. Navigate to the frontend directory
+2. Install dependencies using npm install
+3. Start the development server using npm run dev
+
+## API endpoints
+POST /upload | Accepts multipart form data with multiple files, chunks them, and stores them in memory
+POST /chat | Accepts a question and chat history, retrieves context, and returns a generated answer
+GET /documents | Returns a list of uploaded documents and their respective chunk counts
+DELETE /documents/{name} | Removes a specific document and all of its associated chunks from the store
+
+## Project structure
+backend/
+  main.py
+  llm.py
+  ingest.py
+  store.py
+  retrieval.py
+  requirements.txt
+  .env.example
+frontend/
+  index.html
+  vite.config.js
+  package.json
+  src/
+    main.jsx
+    App.jsx
+    index.css
 
 ---
-*Created with by Saif*
+Built by Saif — Alfaleus Technologies internship screening
