@@ -63,10 +63,25 @@ Reciprocal Rank Fusion (RRF) combines the results from both methods. It takes th
 Out-of-scope queries are handled in two layers. First, if the highest retrieval confidence score is below a predefined threshold, the system immediately flags the query as out of scope. Second, the language model is instructed via its system prompt to state it cannot find the answer if the provided chunks do not contain relevant information.
 
 ## Real document test
-Document: AI-Introduction-Sample.txt
-Q: Who coined the term Artificial Intelligence and when? -> A: The term "Artificial Intelligence" was coined in 1956 by John McCarthy. -> Source: AI-Introduction-Sample.txt, page N/A, 98.5% confidence -> Passage: The term "Artificial Intelligence" was coined in 1956 by John McCarthy at the Dartmouth Conference, which is widely considered the birth of AI as a formal academic discipline.
-Q: In which paper were transformers introduced? -> A: Transformers were introduced in the 2017 paper "Attention Is All You Need". -> Source: AI-Introduction-Sample.txt, page N/A, 97.8% confidence -> Passage: Transformers: Introduced in the 2017 paper "Attention Is All You Need," transformers revolutionized natural language processing and led to models like GPT and BERT.
-Out-of-scope test: "What is the capital of France?" -> "I could not find this in the uploaded documents."
+Test document: [AI-Introduction-Sample.txt](frontend/public/sample.txt)
+
+Test case 1
+- Question: Who coined the term Artificial Intelligence and when?
+- Answer: The term "Artificial Intelligence" was coined in 1956 by John McCarthy.
+- Source: AI-Introduction-Sample.txt, page N/A
+- Confidence: 98.5%
+- Passage: The term "Artificial Intelligence" was coined in 1956 by John McCarthy at the Dartmouth Conference, which is widely considered the birth of AI as a formal academic discipline.
+
+Test case 2
+- Question: In which paper were transformers introduced?
+- Answer: Transformers were introduced in the 2017 paper "Attention Is All You Need".
+- Source: AI-Introduction-Sample.txt, page N/A
+- Confidence: 97.8%
+- Passage: Transformers: Introduced in the 2017 paper "Attention Is All You Need," transformers revolutionized natural language processing and led to models like GPT and BERT.
+
+Out of scope test
+- Question: What is the capital of France?
+- Answer: I could not find this in the uploaded documents.
 
 ## Local setup
 Backend setup:
