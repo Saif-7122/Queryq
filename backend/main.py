@@ -8,6 +8,7 @@ Endpoints:
   DELETE /documents/{doc_name}    — Remove a document and all its chunks from the store.
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,7 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -209,6 +211,76 @@ async def chat(request: ChatRequest):
         answer=llm_result["answer"],
         sources=sources,
         out_of_scope=False,
+    )
+
+
+@app.post("/chat/stream", summary="Stream an answer about uploaded documents (SSE)")
+async def chat_stream(request: ChatRequest):
+    """
+    Same as /chat but returns a Server-Sent Events stream so the frontend
+    can render tokens word-by-word as they arrive from the LLM.
+
+    SSE event format:
+      data: {"type": "sources", "sources": [...], "out_of_scope": bool}
+      data: {"type": "token",   "token":   "<text>"}
+      data: {"type": "done"}
+    """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    if document_store.get_embedding_matrix() is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No documents have been uploaded yet. Please upload at least one document first.",
+        )
+
+    from ingest import _get_embedding_model
+    from llm import stream_answer_question
+
+    model = _get_embedding_model()
+    query_embedding: np.ndarray = model.encode(
+        "Represent this sentence for searching relevant passages: " + request.question,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+    )
+
+    retrieved = retrieve(
+        query_text=request.question,
+        query_embedding=query_embedding,
+        store=document_store,
+        top_k=10,
+    )
+
+    sources_payload = [
+        {
+            "text": item["chunk"]["text"],
+            "doc_name": item["chunk"]["doc_name"],
+            "page_num": item["chunk"]["page_num"],
+            "confidence": round(item["confidence"], 4),
+        }
+        for item in retrieved
+    ]
+
+    history_dicts = [msg.model_dump() for msg in request.history]
+
+    async def event_stream():
+        if not retrieved:
+            yield f"data: {json.dumps({'type': 'sources', 'sources': [], 'out_of_scope': True})}\n\n"
+            yield f"data: {json.dumps({'type': 'token', 'token': 'I could not find this in the uploaded documents.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
+
+        yield f"data: {json.dumps({'type': 'sources', 'sources': sources_payload, 'out_of_scope': False})}\n\n"
+
+        for token in stream_answer_question(request.question, retrieved, history_dicts):
+            yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

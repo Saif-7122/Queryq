@@ -19,6 +19,28 @@ function LoadingSkeleton() {
   )
 }
 
+// ─── ColdStartBanner ────────────────────────────────────────────────────────
+function ColdStartBanner({ onDismiss }) {
+  return (
+    <div className="mx-4 mt-3 flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 fade-in">
+      <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd"/>
+      </svg>
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] font-bold text-amber-800 leading-snug">Backend waking up</p>
+        <p className="text-[10px] text-amber-700 leading-relaxed mt-0.5">
+          First request after inactivity may take 30–60 s while the server starts. Please wait — it&apos;s not broken!
+        </p>
+      </div>
+      <button onClick={onDismiss} className="text-amber-400 hover:text-amber-600 transition-colors shrink-0">
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 // ─── FileUploader ──────────────────────────────────────────────────────────
 function FileUploader({ onUpload }) {
   const [dragging, setDragging] = useState(false)
@@ -27,30 +49,20 @@ function FileUploader({ onUpload }) {
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
 
-  const handleFiles = useCallback(async (files) => {
+  const uploadFiles = useCallback(async (files) => {
     if (!files || files.length === 0) return
     setError(null)
     setUploading(true)
-    
-    // Display the first filename or count for progress
-    if (files.length === 1) {
-      setUploadingFile(files[0].name)
-    } else {
-      setUploadingFile(`${files.length} files`)
-    }
-
+    setUploadingFile(files.length === 1 ? files[0].name : `${files.length} files`)
     const form = new FormData()
     for (const file of files) form.append('files', file)
     try {
-      const res = await fetch(`${API}/upload`, { 
-        method: 'POST', 
+      const res = await fetch(`${API}/upload`, {
+        method: 'POST',
         body: form,
-        signal: AbortSignal.timeout(120000) // 2 minute timeout
+        signal: AbortSignal.timeout(120000),
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Upload failed')
-      }
+      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed') }
       onUpload()
     } catch (e) {
       setError(e.message)
@@ -60,8 +72,20 @@ function FileUploader({ onUpload }) {
     }
   }, [onUpload])
 
+  const handleSampleDoc = useCallback(async (e) => {
+    e.stopPropagation()
+    try {
+      const res = await fetch('/sample.txt')
+      const blob = await res.blob()
+      const file = new File([blob], 'AI-Introduction-Sample.txt', { type: 'text/plain' })
+      await uploadFiles([file])
+    } catch (e) {
+      setError('Could not load sample document.')
+    }
+  }, [uploadFiles])
+
   const onDrop = (e) => {
-    e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files)
+    e.preventDefault(); setDragging(false); uploadFiles(Array.from(e.dataTransfer.files))
   }
 
   return (
@@ -75,7 +99,7 @@ function FileUploader({ onUpload }) {
           ${dragging ? 'border-brand-500 bg-brand-50' : 'border-slate-300 hover:border-brand-400 bg-white hover:bg-slate-50'}`}
       >
         <input ref={inputRef} type="file" multiple accept=".pdf,.txt" className="hidden"
-          onChange={(e) => handleFiles(e.target.files)} />
+          onChange={(e) => uploadFiles(Array.from(e.target.files))} />
         {uploading ? (
           <div className="flex flex-col items-center gap-2.5 w-full text-center">
             <svg className="animate-spin w-5 h-5 text-brand-600 shrink-0" fill="none" viewBox="0 0 24 24">
@@ -83,10 +107,7 @@ function FileUploader({ onUpload }) {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
             <div className="w-full flex flex-col gap-1 px-2">
-              <span className="text-[11px] text-slate-500 font-semibold truncate max-w-full">
-                Uploading {uploadingFile}…
-              </span>
-              {/* Progress bar animation */}
+              <span className="text-[11px] text-slate-500 font-semibold truncate max-w-full">Uploading {uploadingFile}…</span>
               <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
                 <div className="h-full bg-brand-600 rounded-full animate-[loading-bar_1.5s_infinite_ease-in-out]" style={{ width: '40%' }} />
               </div>
@@ -97,15 +118,25 @@ function FileUploader({ onUpload }) {
             <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
             </svg>
-            <p className="text-xs text-slate-500 text-center font-medium">
-              Drop PDF or .txt
-            </p>
+            <p className="text-xs text-slate-500 text-center font-medium">Drop PDF or .txt</p>
             <button className="mt-1 bg-brand-600 text-white text-[11px] font-semibold px-3 py-1.5 rounded-full shadow-sm hover:bg-brand-700 transition-colors">
               + Add document
             </button>
           </>
         )}
       </div>
+      {/* Sample document shortcut */}
+      {!uploading && (
+        <button
+          onClick={handleSampleDoc}
+          className="flex items-center justify-center gap-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold py-1.5 rounded-lg hover:bg-brand-50 transition-colors border border-dashed border-brand-300 hover:border-brand-500"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+          </svg>
+          Try with a sample document
+        </button>
+      )}
       {error && (
         <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{error}</p>
       )}
@@ -443,6 +474,7 @@ export default function App() {
   const [loading, setLoading]   = useState(false)
   const [deleteError, setDeleteError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showColdStart, setShowColdStart] = useState(true)
   const threadRef = useRef(null)
 
   const fetchDocuments = useCallback(async () => {
@@ -493,36 +525,74 @@ export default function App() {
   const handleSend = async (question) => {
     const userMsg = { role: 'user', content: question }
     const newMessages = [...messages, userMsg]
-    setMessages(newMessages)
+    // Placeholder assistant message that fills in as tokens arrive
+    const placeholder = { role: 'assistant', content: '', sources: [], out_of_scope: false, streaming: true }
+    setMessages([...newMessages, placeholder])
     scrollToBottom()
     setLoading(true)
 
     const historyForApi = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
 
     try {
-      const res = await fetch(`${API}/chat`, {
+      const res = await fetch(`${API}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, history: historyForApi }),
-        signal: AbortSignal.timeout(120000), // 2 minute timeout
+        signal: AbortSignal.timeout(120000),
       })
+
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.detail || 'Chat request failed')
       }
-      const data = await res.json()
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: data.answer,
-        sources: data.sources,
-        out_of_scope: data.out_of_scope,
-      }])
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let sources = []
+      let outOfScope = false
+      let fullContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() // keep any incomplete trailing chunk
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue
+          const evt = JSON.parse(part.slice(6))
+          if (evt.type === 'sources') {
+            sources = evt.sources
+            outOfScope = evt.out_of_scope
+          } else if (evt.type === 'token') {
+            fullContent += evt.token
+            setMessages(prev => {
+              const msgs = [...prev]
+              msgs[msgs.length - 1] = { role: 'assistant', content: fullContent, sources, out_of_scope: outOfScope, streaming: true }
+              return msgs
+            })
+            scrollToBottom()
+          } else if (evt.type === 'done') {
+            setMessages(prev => {
+              const msgs = [...prev]
+              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
+              return msgs
+            })
+          }
+        }
+      }
     } catch (e) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `⚠️ Error: ${e.message}`,
-        sources: [], out_of_scope: false,
-      }])
+      setMessages(prev => {
+        const msgs = [...prev]
+        const last = msgs[msgs.length - 1]
+        if (last?.streaming) {
+          msgs[msgs.length - 1] = { role: 'assistant', content: `⚠️ Error: ${e.message}`, sources: [], out_of_scope: false }
+        } else {
+          msgs.push({ role: 'assistant', content: `⚠️ Error: ${e.message}`, sources: [], out_of_scope: false })
+        }
+        return msgs
+      })
     } finally {
       setLoading(false)
       scrollToBottom()
@@ -568,6 +638,9 @@ export default function App() {
             </svg>
           </button>
         </div>
+
+        {/* Cold-start banner */}
+        {showColdStart && <ColdStartBanner onDismiss={() => setShowColdStart(false)} />}
 
         {/* Document Manager */}
         <DocumentManager docs={docs} fetching={fetching} onUpload={fetchDocuments} onDelete={handleDelete} />
