@@ -2,7 +2,7 @@
 main.py — FastAPI application entry point.
 
 Endpoints:
-  POST   /upload                  — Accept files, run full ingestion pipeline, store in memory.
+  POST   /upload                  — Accept files, run full ingestion pipeline, store in Chroma.
   POST   /chat                    — Accept question + history, run retrieval + LLM, return answer.
   GET    /documents               — Return the list of currently loaded document names.
   DELETE /documents/{doc_name}    — Remove a document and all its chunks from the store.
@@ -12,12 +12,12 @@ import json
 import os
 from contextlib import asynccontextmanager
 
-import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from langchain.retrievers import EnsembleRetriever
 
 load_dotenv()
 
@@ -27,17 +27,16 @@ if not os.environ.get("GROQ_API_KEY"):
         "and fill in your Groq API key."
     )
 
-from ingest import chunk_text, embed_chunks, parse_file
-from llm import answer_question
-from retrieval import retrieve
-from store import DocumentStore
+from ingest import chunk_text, parse_file
+from llm import answer_question, stream_answer_question
+from langchain_store import LangchainStore
 
-document_store = DocumentStore()
+document_store = LangchainStore()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    document_store.clear()
+    # Chroma is persistent, so we don't clear it on shutdown
 
 app = FastAPI(
     title="Queryq API",
@@ -103,27 +102,16 @@ async def root():
 
 @app.post("/upload", response_model=list[UploadResponse], summary="Upload and ingest documents")
 async def upload_files(files: list[UploadFile] = File(...)):
-    """
-    Accept one or more PDF or TXT files.
-
-    For each file:
-      1. Parse pages from raw bytes (PyMuPDF for PDF, decode for TXT).
-      2. Chunk pages into sentence-boundary-aware token windows.
-      3. Embed chunks locally via sentence-transformers.
-      4. Add chunks to the in-memory DocumentStore.
-
-    Returns a summary per file with the number of chunks stored.
-    """
     results: list[UploadResponse] = []
 
     for file in files:
         filename = file.filename or "unknown"
         ext = filename.rsplit(".", 1)[-1].lower()
 
-        if ext not in ("pdf", "txt"):
+        if ext not in ("pdf", "txt", "docx", "png", "jpg", "jpeg"):
             raise HTTPException(
                 status_code=415,
-                detail=f"Unsupported file type '{ext}' for '{filename}'. Only PDF and TXT are accepted.",
+                detail=f"Unsupported file type '{ext}' for '{filename}'. Only PDF, TXT, DOCX, and images are accepted.",
             )
 
         file_bytes = await file.read()
@@ -131,59 +119,46 @@ async def upload_files(files: list[UploadFile] = File(...)):
         try:
             pages = parse_file(file_bytes, filename)
             chunks = chunk_text(pages)
-            chunks_with_embeddings = embed_chunks(chunks)
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to process '{filename}': {exc}",
             ) from exc
 
-        document_store.add_document(chunks_with_embeddings)
+        document_store.add_documents(chunks)
 
-        results.append(UploadResponse(doc_name=filename, chunk_count=len(chunks_with_embeddings)))
+        results.append(UploadResponse(doc_name=filename, chunk_count=len(chunks)))
 
     return results
+
+def _get_ensemble_retriever(k: int = 10):
+    bm25 = document_store.get_bm25_retriever(k=k)
+    vector = document_store.get_vector_retriever(k=k)
+    
+    if bm25 is None or vector is None:
+        return None
+        
+    return EnsembleRetriever(
+        retrievers=[bm25, vector],
+        weights=[0.5, 0.5]
+    )
 
 
 @app.post("/chat", response_model=ChatResponse, summary="Ask a question about uploaded documents")
 async def chat(request: ChatRequest):
-    """
-    Answer a question grounded in the uploaded documents.
-
-    Steps:
-      1. Embed the query locally.
-      2. Run hybrid retrieval (dense + BM25 + RRF).
-      3. If the top confidence is below the threshold, return out_of_scope=True.
-      4. Call the Groq LLM with the retrieved context and conversation history.
-
-    Returns the answer, source citations, and an out-of-scope flag.
-    """
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    if document_store.get_embedding_matrix() is None:
+    ensemble_retriever = _get_ensemble_retriever(k=10)
+    if ensemble_retriever is None:
         raise HTTPException(
             status_code=400,
             detail="No documents have been uploaded yet. Please upload at least one document first.",
         )
 
-    from ingest import _get_embedding_model
+    retrieved_docs = ensemble_retriever.invoke(request.question)
 
-    model = _get_embedding_model()
-    query_embedding: np.ndarray = model.encode(
-        "Represent this sentence for searching relevant passages: " + request.question,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-    )
-
-    retrieved = retrieve(
-        query_text=request.question,
-        query_embedding=query_embedding,
-        store=document_store,
-        top_k=10,
-    )
-
-    if not retrieved:
+    if not retrieved_docs:
         return ChatResponse(
             answer="I could not find this in the uploaded documents.",
             sources=[],
@@ -191,20 +166,22 @@ async def chat(request: ChatRequest):
         )
 
     history_dicts = [msg.model_dump() for msg in request.history]
+    
+    # Langchain Chain Call
     llm_result = answer_question(
         question=request.question,
-        chunks=retrieved,
+        docs=retrieved_docs,
         history=history_dicts,
     )
 
     sources = [
         SourceItem(
-            text=item["chunk"]["text"],
-            doc_name=item["chunk"]["doc_name"],
-            page_num=item["chunk"]["page_num"],
-            confidence=round(item["confidence"], 4),
+            text=doc.page_content,
+            doc_name=doc.metadata.get("doc_name", "unknown"),
+            page_num=doc.metadata.get("page_num", 1),
+            confidence=1.0, # Confidence is abstract with RRF in langchain
         )
-        for item in retrieved
+        for doc in retrieved_docs
     ]
 
     return ChatResponse(
@@ -216,55 +193,32 @@ async def chat(request: ChatRequest):
 
 @app.post("/chat/stream", summary="Stream an answer about uploaded documents (SSE)")
 async def chat_stream(request: ChatRequest):
-    """
-    Same as /chat but returns a Server-Sent Events stream so the frontend
-    can render tokens word-by-word as they arrive from the LLM.
-
-    SSE event format:
-      data: {"type": "sources", "sources": [...], "out_of_scope": bool}
-      data: {"type": "token",   "token":   "<text>"}
-      data: {"type": "done"}
-    """
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    if document_store.get_embedding_matrix() is None:
+    ensemble_retriever = _get_ensemble_retriever(k=10)
+    if ensemble_retriever is None:
         raise HTTPException(
             status_code=400,
             detail="No documents have been uploaded yet. Please upload at least one document first.",
         )
 
-    from ingest import _get_embedding_model
-    from llm import stream_answer_question
-
-    model = _get_embedding_model()
-    query_embedding: np.ndarray = model.encode(
-        "Represent this sentence for searching relevant passages: " + request.question,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-    )
-
-    retrieved = retrieve(
-        query_text=request.question,
-        query_embedding=query_embedding,
-        store=document_store,
-        top_k=10,
-    )
+    retrieved_docs = ensemble_retriever.invoke(request.question)
 
     sources_payload = [
         {
-            "text": item["chunk"]["text"],
-            "doc_name": item["chunk"]["doc_name"],
-            "page_num": item["chunk"]["page_num"],
-            "confidence": round(item["confidence"], 4),
+            "text": doc.page_content,
+            "doc_name": doc.metadata.get("doc_name", "unknown"),
+            "page_num": doc.metadata.get("page_num", 1),
+            "confidence": 1.0,
         }
-        for item in retrieved
+        for doc in retrieved_docs
     ]
 
     history_dicts = [msg.model_dump() for msg in request.history]
 
     async def event_stream():
-        if not retrieved:
+        if not retrieved_docs:
             yield f"data: {json.dumps({'type': 'sources', 'sources': [], 'out_of_scope': True})}\n\n"
             yield f"data: {json.dumps({'type': 'token', 'token': 'I could not find this in the uploaded documents.'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -272,7 +226,7 @@ async def chat_stream(request: ChatRequest):
 
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources_payload, 'out_of_scope': False})}\n\n"
 
-        for token in stream_answer_question(request.question, retrieved, history_dicts):
+        for token in stream_answer_question(request.question, retrieved_docs, history_dicts):
             yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -286,15 +240,11 @@ async def chat_stream(request: ChatRequest):
 
 @app.get("/documents", response_model=DocumentsResponse, summary="List uploaded documents")
 async def list_documents():
-    """
-    Return the unique set of document names currently held in the store, 
-    along with their chunk counts.
-    """
-    chunks = document_store.get_all_chunks()
+    metadatas = document_store.get_documents_metadata()
     
     counts: dict[str, int] = {}
-    for chunk in chunks:
-        name = chunk.get("doc_name", "")
+    for meta in metadatas:
+        name = meta.get("doc_name", "")
         if name:
             counts[name] = counts.get(name, 0) + 1
             
@@ -308,14 +258,7 @@ async def list_documents():
 
 @app.delete("/documents/{doc_name}", response_model=DeleteResponse, summary="Delete a document from the store")
 async def delete_document(doc_name: str):
-    """
-    Remove all chunks associated with `doc_name` from the in-memory store
-    and rebuild the BM25 and embedding indices.
-
-    Returns the doc_name and how many chunks were removed.
-    Raises 404 if the document was not found in the store.
-    """
-    existing = {c.get("doc_name") for c in document_store.get_all_chunks()}
+    existing = {m.get("doc_name") for m in document_store.get_documents_metadata()}
     if doc_name not in existing:
         raise HTTPException(
             status_code=404,
@@ -324,6 +267,6 @@ async def delete_document(doc_name: str):
 
     removed_count = document_store.remove_document(doc_name)
     
-    remaining_docs = list({c.get("doc_name") for c in document_store.get_all_chunks() if c.get("doc_name")})
+    remaining_docs = list({m.get("doc_name") for m in document_store.get_documents_metadata() if m.get("doc_name")})
 
     return DeleteResponse(removed=doc_name, remaining_docs=remaining_docs)

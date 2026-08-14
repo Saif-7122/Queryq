@@ -34,3 +34,7 @@ frontend/*.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Database
+chroma_db/
+backend/chroma_db/

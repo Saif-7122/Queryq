@@ -2,55 +2,23 @@
 ingest.py — Document ingestion pipeline.
 
 Steps:
-  1. parse_file   : Extract raw text pages from PDF or TXT bytes.
+  1. parse_file   : Extract raw text from PDF, TXT, DOCX, or Image bytes.
   2. chunk_text   : Split pages into sentence-boundary-aware, overlapping token chunks.
-  3. embed_chunks : Embed chunks locally using sentence-transformers (no API calls).
 """
 
+import requests
+import os
+import io
 import uuid
 import re
 from typing import Any
-import numpy as np
-from fastembed import TextEmbedding
-
-class FastEmbedWrapper:
-    def __init__(self):
-        # fastembed handles lazy downloading and ONNX model loading (<50MB model, <80MB RAM total)
-        self.model = TextEmbedding()
-
-    def encode(self, sentences, batch_size=64, show_progress_bar=False, normalize_embeddings=True, convert_to_numpy=True):
-        is_single = isinstance(sentences, str)
-        inputs = [sentences] if is_single else list(sentences)
-        
-        embeddings = list(self.model.embed(inputs))
-        
-        if convert_to_numpy:
-            embeddings = np.array(embeddings, dtype=np.float32)
-            
-        if is_single:
-            return embeddings[0]
-        return embeddings
-
-# Load once at startup — not inside a function using fastembed
-EMB_MODEL = FastEmbedWrapper()
+from PIL import Image
 
 
 
 def parse_file(file_bytes: bytes, filename: str) -> list[dict]:
     """
-    Parse a PDF or plain-text file from raw bytes.
-
-    Args:
-        file_bytes: Raw bytes of the uploaded file.
-        filename:   Original filename (used to detect type and as doc_name).
-
-    Returns:
-        List of page dicts:
-          {
-            "text":     str,   # raw text of the page / full text for .txt
-            "page_num": int,   # 1-based page number (always 1 for .txt)
-            "doc_name": str,   # original filename
-          }
+    Parse a PDF, TXT, DOCX, or Image file from raw bytes.
     """
     ext = filename.rsplit(".", 1)[-1].lower()
 
@@ -58,29 +26,92 @@ def parse_file(file_bytes: bytes, filename: str) -> list[dict]:
         return _parse_pdf(file_bytes, filename)
     elif ext == "txt":
         return _parse_txt(file_bytes, filename)
+    elif ext == "docx":
+        return _parse_docx(file_bytes, filename)
+    elif ext in ("png", "jpg", "jpeg"):
+        return _parse_image(file_bytes, filename)
     else:
-        raise ValueError(f"Unsupported file type: '.{ext}'. Only PDF and TXT are supported.")
+        raise ValueError(f"Unsupported file type: '.{ext}'.")
 
+
+def _ocr_space_bytes(file_bytes: bytes, ext: str = "jpg") -> str:
+    """Helper to call OCR.space API."""
+    api_key = os.environ.get("OCR_SPACE_API_KEY")
+    if not api_key:
+        return ""
+    payload = {'apikey': api_key, 'language': 'eng'}
+    try:
+        response = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'file': (f'image.{ext}', file_bytes, f'image/{ext}')},
+            data=payload,
+            timeout=15
+        )
+        if response.status_code == 200:
+            result = response.json()
+            if not result.get("IsErroredOnProcessing"):
+                texts = [p.get("ParsedText", "") for p in result.get("ParsedResults", [])]
+                return "\n".join(texts).strip()
+    except Exception:
+        pass
+    return ""
 
 def _parse_pdf(file_bytes: bytes, filename: str) -> list[dict]:
-    """Extract per-page text from a PDF using PyMuPDF (fitz)."""
+    """Extract per-page text from a PDF using PyMuPDF (fitz) and OCR.space.
+    
+    - For pages with little/no text (scanned): run OCR on the full page render.
+    - For pages with text but also embedded images: extract text normally AND
+      run OCR on each embedded image to capture figure/diagram content.
+    """
     try:
         import fitz
     except ImportError as e:
-        raise ImportError(
-            "PyMuPDF is required for PDF parsing. Install with: pip install PyMuPDF"
-        ) from e
+        raise ImportError("PyMuPDF is required for PDF parsing.") from e
 
+    has_ocr_key = bool(os.environ.get("OCR_SPACE_API_KEY"))
     pages = []
     with fitz.open(stream=file_bytes, filetype="pdf") as doc:
         for page_index, page in enumerate(doc, start=1):
-            text = page.get_text("text")
-            text = text.strip()
-            if text:
+            text = page.get_text("text").strip()
+            ocr_parts = []
+
+            if has_ocr_key:
+                if len(text) < 50:
+                    # Scanned page — render the whole page and OCR it
+                    try:
+                        pix = page.get_pixmap(dpi=150)
+                        img_bytes = pix.tobytes("jpeg")
+                        ocr_text = _ocr_space_bytes(img_bytes, "jpg")
+                        if ocr_text:
+                            ocr_parts.append(ocr_text)
+                    except Exception:
+                        pass
+                else:
+                    # Text page — also OCR any embedded images (figures, diagrams)
+                    try:
+                        image_list = page.get_images(full=True)
+                        for img_info in image_list:
+                            xref = img_info[0]
+                            base_image = doc.extract_image(xref)
+                            img_bytes = base_image["image"]
+                            img_ext = base_image.get("ext", "jpg")
+                            ocr_text = _ocr_space_bytes(img_bytes, img_ext)
+                            if ocr_text:
+                                ocr_parts.append(ocr_text)
+                    except Exception:
+                        pass
+
+            # Combine native text with any OCR'd image text
+            combined = text
+            if ocr_parts:
+                combined = text + "\n" + "\n".join(ocr_parts) if text else "\n".join(ocr_parts)
+            combined = combined.strip()
+
+            if combined:
                 pages.append({
-                     "text": text,
-                     "page_num": page_index,
-                     "doc_name": filename,
+                    "text": combined,
+                    "page_num": page_index,
+                    "doc_name": filename,
                 })
     return pages
 
@@ -88,6 +119,37 @@ def _parse_pdf(file_bytes: bytes, filename: str) -> list[dict]:
 def _parse_txt(file_bytes: bytes, filename: str) -> list[dict]:
     """Decode a plain-text file as a single 'page'."""
     text = file_bytes.decode("utf-8", errors="replace").strip()
+    if not text:
+        return []
+    return [{
+        "text": text,
+        "page_num": 1,
+        "doc_name": filename,
+    }]
+
+def _parse_image(file_bytes: bytes, filename: str) -> list[dict]:
+    """Extract text from an image using OCR.space."""
+    ext = filename.rsplit(".", 1)[-1].lower()
+    text = _ocr_space_bytes(file_bytes, ext)
+        
+    if not text:
+        return []
+    return [{
+        "text": text,
+        "page_num": 1,
+        "doc_name": filename,
+    }]
+
+def _parse_docx(file_bytes: bytes, filename: str) -> list[dict]:
+    """Extract text from a DOCX file."""
+    try:
+        import docx
+    except ImportError as e:
+        raise ImportError("python-docx is required for DOCX parsing.") from e
+        
+    doc = docx.Document(io.BytesIO(file_bytes))
+    text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+    
     if not text:
         return []
     return [{
@@ -197,43 +259,4 @@ def chunk_text(
     return chunks
 
 
-def _get_embedding_model():
-    return EMB_MODEL
 
-
-def embed_chunks(chunks: list[dict]) -> list[dict]:
-    """
-    Add a local embedding vector to each chunk using BAAI/bge-small-en-v1.5.
-
-    The model is loaded once and cached for the process lifetime — no API calls.
-
-    BGE models benefit from a query prefix at retrieval time, but for document
-    ingestion we embed the raw text (no prefix). The retrieval module should
-    prefix queries with "Represent this sentence for searching relevant passages: ".
-
-    Args:
-        chunks: Output of chunk_text() — list of chunk dicts.
-
-    Returns:
-        The same list of chunk dicts, each now containing:
-          "embedding": list[float]  — 384-dimensional vector for bge-small-en-v1.5
-    """
-    if not chunks:
-        return chunks
-
-    model = _get_embedding_model()
-
-    texts = [chunk["text"] for chunk in chunks]
-
-    embeddings = model.encode(
-        texts,
-        batch_size=64,
-        show_progress_bar=False,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-    )
-
-    for chunk, embedding in zip(chunks, embeddings):
-        chunk["embedding"] = embedding.tolist()
-
-    return chunks

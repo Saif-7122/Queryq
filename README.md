@@ -19,7 +19,8 @@ Users upload PDF or text files, which the backend parses and splits into managea
 ![Out-of-scope query refusal](Screenshot%202026-05-18%20141209.png)
 
 ## Features
-- PDF and plain text file upload
+- PDF, plain text, DOCX, and Image (PNG/JPG) file upload
+- Cloud-based OCR via OCR.space for scanned documents and images
 - Multi-document support
 - Drag and drop file interface
 - Local embeddings generation
@@ -29,25 +30,23 @@ Users upload PDF or text files, which the backend parses and splits into managea
 - Retrieval confidence scores
 - Out-of-scope query detection
 - Conversation history context
-
+ 
 ## Architecture
 
 Browser
   |
   v
 FastAPI
-  |-- ingest.py (PDF parsing and text chunking)
-  |-- store.py (In-memory vector and keyword index)
-  |-- retrieval.py (Hybrid search and RRF scoring)
-  |-- llm.py (Prompt assembly and API communication)
+  |-- ingest.py (PDF/DOCX/Image parsing, OCR, and text chunking)
+  |-- langchain_store.py (Chroma DB persistent vector store and BM25 initialization)
+  |-- llm.py (LangChain orchestration, ChatGroq, and RRF via EnsembleRetriever)
 
 ## Tech stack
-Backend | Python, FastAPI
+Backend | Python, FastAPI, LangChain
 Frontend | React, Vite, Tailwind CSS
-Parsing | PyMuPDF
-Embeddings | SentenceTransformers
-Keyword search | Rank-BM25
-LLM | Groq API
+Parsing & OCR | PyMuPDF, OCR.space API, python-docx, Pillow
+Vector DB & Search | Chroma DB, SentenceTransformers, Rank-BM25
+LLM | Groq API (via LangChain)
 Deployment | Render, Vercel
 
 ## Chunking strategy
